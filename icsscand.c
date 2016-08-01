@@ -1,7 +1,7 @@
 /*
  * icsscd.c - Userspace daemon for Intrepid SocketCAN support
  *
- * Copyright (c) 2016 Intrepid Control Systems, Inc. 
+ * Copyright (c) 2016 Intrepid Control Systems, Inc.
  * All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify it
@@ -31,12 +31,12 @@
  * DAMAGE.
  *
  */
- 
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <pthread.h>
 #include <unistd.h>
-#include <string.h> 
+#include <string.h>
 #include <signal.h>
 #include <syslog.h>
 #include <errno.h>
@@ -51,7 +51,7 @@
 #include <fcntl.h>
 #include <pthread.h>
 #include <ics/icsneo40API.h>
- 
+
 #define DAEMON_NAME             "icsscand"
 #define RUN_AS_USER             "root"
 #define NETDEVICE_PATH          "/dev/intrepid_netdevice"
@@ -104,12 +104,12 @@ static int              netdevice               = 0; /* fd of /dev/intrepid_netd
 static int              shared_mem_size         = 0; /* size of shared kernel mem */
 static int              max_num_ifaces          = 0; /* max ifaces the kernel supports */
 static unsigned char    *shared_mem             = NULL; /* shared kernel mem */
-static int exit_code; 
+static int exit_code;
 
 static struct connected_device_t *connected     = NULL; /* connected devices */
 static struct netid_lookup_t     *netid_lookup  = NULL; /* iface index -> device/netid */
 static pthread_mutex_t            devices_mutex       ; /* mutex for adding/removing devices */
- 
+
 #define RX_BOX_SIZE                (shared_mem_size / (max_num_ifaces * 2))
 #define TX_BOX_SIZE                (shared_mem_size / 4)
 #define GET_RX_BOX(DEVICE_INDEX)   (shared_mem + (RX_BOX_SIZE * DEVICE_INDEX))
@@ -127,33 +127,33 @@ static pthread_mutex_t            devices_mutex       ; /* mutex for adding/remo
 
 static void print_usage(char *prg)
 {
-	fprintf(stderr, "\nUsage: %s\n\n", prg);
-	fprintf(stderr, "         -D         (run as a daemon)\n");
-	fprintf(stderr, "         -h         (show this help page)\n");
-	fprintf(stderr, "\n");
-	exit(EXIT_FAILURE);
+        fprintf(stderr, "\nUsage: %s\n\n", prg);
+        fprintf(stderr, "         -D         (run as a daemon)\n");
+        fprintf(stderr, "         -h         (show this help page)\n");
+        fprintf(stderr, "\n");
+        exit(EXIT_FAILURE);
 }
 
 static void signal_handler(int signum)
 {
-	switch (signum) {
+        switch (signum) {
 
-	case SIGUSR1:
-		exit(EXIT_SUCCESS);
-		break;
-	case SIGALRM:
-	case SIGCHLD:
-		LOG(LOG_NOTICE, "received signal %i\n", signum);
-		exit_code = EXIT_FAILURE;
-		icsscand_running = 0;
-		break;
-	case SIGINT:
-	case SIGTERM:
-		LOG(LOG_NOTICE, "received signal %i\n", signum);
-		exit_code = EXIT_SUCCESS;
-		icsscand_running = 0;
-		break;
-	}
+        case SIGUSR1:
+                exit(EXIT_SUCCESS);
+                break;
+        case SIGALRM:
+        case SIGCHLD:
+                LOG(LOG_NOTICE, "received signal %i\n", signum);
+                exit_code = EXIT_FAILURE;
+                icsscand_running = 0;
+                break;
+        case SIGINT:
+        case SIGTERM:
+                LOG(LOG_NOTICE, "received signal %i\n", signum);
+                exit_code = EXIT_SUCCESS;
+                icsscand_running = 0;
+                break;
+        }
 }
 
 static void free_connected_device(struct connected_device_t* device, int join_thread)
@@ -161,7 +161,7 @@ static void free_connected_device(struct connected_device_t* device, int join_th
         if (join_thread)
         {
                 device->keep_running = 0;
-                pthread_join(device->rx_thread, NULL); 
+                pthread_join(device->rx_thread, NULL);
         }
         if (device->handle)
         {
@@ -181,7 +181,7 @@ static void free_connected_device(struct connected_device_t* device, int join_th
         memset(device, 0, sizeof(*device));
 }
 
-static void setup_interface_info(int device_index, int net_id, 
+static void setup_interface_info(int device_index, int net_id,
         int iface_index, const char* name)
 {
         struct connected_device_t *device  = &connected[device_index];
@@ -193,10 +193,10 @@ static void setup_interface_info(int device_index, int net_id,
         netid_lookup[iface->kernel_handle].netid = net_id;
 
         /* this is apparently how you change a netdevice's name */
-        if (name) 
+        if (name)
         {
                 char new_name[IFNAMSIZ];
-		struct ifreq ifr;
+                struct ifreq ifr;
                 int s = socket(PF_INET, SOCK_DGRAM, 0);
 
                 sprintf(new_name, "ics%d%s", device_index, name);
@@ -215,8 +215,8 @@ static void setup_interface_info(int device_index, int net_id,
                                 strncpy(iface->name, new_name, IFNAMSIZ);
 
                         close(s);
-                }	
-	}
+                }
+        }
 }
 
 static void* rx(void* arg)
@@ -228,14 +228,14 @@ static void* rx(void* arg)
                 sizeof(icsSpyMessage) * MSG_BUFFER_NUM_MSGS);
         int *box_count   = (int*)malloc(sizeof(int) * dev->num_interfaces);
         int max_num_msgs = MAX_NUM_RX_MSGS;
-        
+
         /* we pass the num of written messages as a short, so cap at this amount */
         if (max_num_msgs >= 1 << 16)
-                max_num_msgs = (1 << 16) - 1; 
+                max_num_msgs = (1 << 16) - 1;
 
         if (!msgs || !box_count)
         {
-                LOG(LOG_ERR, "could not allocate a %d message buffer\n", 
+                LOG(LOG_ERR, "could not allocate a %d message buffer\n",
                         MSG_BUFFER_NUM_MSGS);
                 goto exit;
         }
@@ -248,7 +248,7 @@ static void* rx(void* arg)
                 int ret = icsneoWaitForRxMessagesWithTimeOut(dev->handle, 100);
                 if (ret < 0)
                 {
-                        LOG(LOG_ERR, "error waiting for messages on device %d\n", 
+                        LOG(LOG_ERR, "error waiting for messages on device %d\n",
                                 dev->device.SerialNumber);
                         goto error;
                 }
@@ -259,7 +259,7 @@ static void* rx(void* arg)
                 ret = icsneoGetMessages(dev->handle, msgs, &num_msgs, &num_errors);
                 if (ret == 0)
                 {
-                        LOG(LOG_ERR, "error reading messages on device %d\n", 
+                        LOG(LOG_ERR, "error reading messages on device %d\n",
                                 dev->device.SerialNumber);
                         goto error;
                 }
@@ -280,17 +280,17 @@ static void* rx(void* arg)
                         if (iface_index == -1)
                                 continue; /* unknown network */
                         iface = &dev->interfaces[iface_index];
-                        
+
                         /* find the appropriate box for writing to this iface */
                         box = (icsSpyMessage*)iface->to_kernel;
 
                         /* copy to kernel memory */
-                        memcpy(box + box_count[iface_index], msg, sizeof(icsSpyMessage)); 
+                        memcpy(box + box_count[iface_index], msg, sizeof(icsSpyMessage));
 
                         /* check to see if the box is full -- if so, notify the kernel */
                         if (++box_count[iface_index] == max_num_msgs)
                         {
-                                unsigned int ioctl_arg = 
+                                unsigned int ioctl_arg =
                                         (iface->kernel_handle << 16) | max_num_msgs;
 
                                 ret = ioctl(netdevice, SIOCSMSGSWRITTEN, ioctl_arg);
@@ -299,9 +299,9 @@ static void* rx(void* arg)
                                         LOG(LOG_ERR, "error transferring to kernel: %s\n",
                                                 strerror(ret));
                                         goto error;
-                                }  
-                                box_count[iface_index] = 0;        
-                        }                                  
+                                }
+                                box_count[iface_index] = 0;
+                        }
                 }
 
                 /* notify the kernel of any boxes that didn't fill up */
@@ -310,8 +310,8 @@ static void* rx(void* arg)
                         struct interface_t *iface = &dev->interfaces[i];
                         if(box_count[i] > 0)
                         {
-                                unsigned int ioctl_arg = 
-                                        (iface->kernel_handle << 16) | box_count[i]; 
+                                unsigned int ioctl_arg =
+                                        (iface->kernel_handle << 16) | box_count[i];
 
                                 ret = ioctl(netdevice, SIOCSMSGSWRITTEN, ioctl_arg);
                                 if (ret < 0)
@@ -319,7 +319,7 @@ static void* rx(void* arg)
                                         LOG(LOG_ERR, "error transferring to kernel: %s\n",
                                                 strerror(ret));
                                         goto error;
-                                }          
+                                }
                         }
                 }
         }
@@ -350,7 +350,7 @@ static void probe_new_devices()
         {
                 free(detected);
                 return;
-        }     
+        }
 
         pthread_mutex_lock(&devices_mutex);
         for (i = 0 ; i < num_devices ; ++i)
@@ -359,7 +359,7 @@ static void probe_new_devices()
                 struct connected_device_t *device = NULL;
 
                 /* see if we're already connected to this device, and if we aren't,
-                 * find a spot for this device in our array */ 
+                 * find a spot for this device in our array */
                 for(j = 0 ; j < max_num_ifaces ; ++j)
                 {
                         if (connected[j].handle              != NULL                    &&
@@ -382,43 +382,43 @@ static void probe_new_devices()
                 ret = icsneoOpenNeoDevice(&detected[i], &device->handle, NULL, 1, 0);
                 if (ret != 1)
                 {
-                        LOG(LOG_ERR, "Unable to open device with serial %i\n", 
+                        LOG(LOG_ERR, "Unable to open device with serial %i\n",
                                 device->device.SerialNumber);
                         continue;
                 }
 
                 device->device = detected[i];
-                
-                /* figure out how many interfaces we need to make */ 
+
+                /* figure out how many interfaces we need to make */
                 switch(device->device.DeviceType)
                 {
-                case NEODEVICE_VCAN3:   
-                        num_nets = 2; 
+                case NEODEVICE_VCAN3:
+                        num_nets = 2;
                         break;
-                case NEODEVICE_FIRE:   
+                case NEODEVICE_FIRE:
                 case NEODEVICE_PLASMA_1_11:
-                case NEODEVICE_PLASMA_1_12: 
+                case NEODEVICE_PLASMA_1_12:
                 case NEODEVICE_PLASMA_1_13:
                 case NEODEVICE_ION_2:
                 case NEODEVICE_ION_3:
-                        /* some ions and plasmas actually have 8, 
+                        /* some ions and plasmas actually have 8,
                         *  but we can't tell from the PID */
-                        num_nets = 6; 
+                        num_nets = 6;
                         break;
                 case NEODEVICE_FIRE2:
                         /* todo: software selectable networks */
                         num_nets = 6;
                         break;
                 }
-                
+
                 if(num_nets <= 0)
                 {
-                        LOG(LOG_ERR, "Unknown device with serial %d\n", 
+                        LOG(LOG_ERR, "Unknown device with serial %d\n",
                                 device->device.SerialNumber);
                         free_connected_device(device, 0);
-                        continue;      
+                        continue;
                 }
-                          
+
                 device->interfaces = (struct interface_t*)malloc(
                         sizeof(struct interface_t) * num_nets
                 );
@@ -432,29 +432,29 @@ static void probe_new_devices()
                                 iface->kernel_handle    = ret;
                                 iface->to_kernel        = GET_RX_BOX(ret);
                         }
-                }   
+                }
 
                 /* make sure we got all the interfaces we wanted */
                 if (device->num_interfaces != num_nets)
                 {
-                        LOG(LOG_ERR, "Could not create all interfaces for %d\n", 
+                        LOG(LOG_ERR, "Could not create all interfaces for %d\n",
                                 device->device.SerialNumber);
-                        free_connected_device(device, 0); 
+                        free_connected_device(device, 0);
                         continue;
-                }    
+                }
 
                 /* build a mapping from network id -> interface id */
                 for(j = 0 ; j < NETID_MAX ; ++j)
-                        device->netid_to_interface[j] = -1;          
+                        device->netid_to_interface[j] = -1;
                 switch(device->device.DeviceType)
                 {
-                case NEODEVICE_VCAN3:   
+                case NEODEVICE_VCAN3:
                         setup_interface_info(device_index, NETID_HSCAN,   0, "can0");
                         setup_interface_info(device_index, NETID_MSCAN,   1, "can1");
                         break;
-                case NEODEVICE_FIRE:   
+                case NEODEVICE_FIRE:
                 case NEODEVICE_PLASMA_1_11:
-                case NEODEVICE_PLASMA_1_12: 
+                case NEODEVICE_PLASMA_1_12:
                 case NEODEVICE_PLASMA_1_13:
                 case NEODEVICE_ION_2:
                 case NEODEVICE_ION_3:
@@ -481,11 +481,11 @@ static void probe_new_devices()
                 ret = pthread_create(&device->rx_thread, NULL, rx, device);
                 if (ret)
                 {
-                        LOG(LOG_ERR, "Error creating thread for %d\n", 
-                                device->device.SerialNumber);     
+                        LOG(LOG_ERR, "Error creating thread for %d\n",
+                                device->device.SerialNumber);
                         free_connected_device(device, 0);
                         continue;
-                }              
+                }
         }
         pthread_mutex_unlock(&devices_mutex);
 
@@ -516,7 +516,7 @@ static void tx(int index, int count)
                  * lookup and set the correct NetworkID */
                 if (msg->NetworkID < 0 || msg->NetworkID >= max_num_ifaces)
                         continue;
-                lookup = &netid_lookup[msg->NetworkID]; 
+                lookup = &netid_lookup[msg->NetworkID];
 
                 if (lookup->device_index < 0 || lookup->device_index > max_num_ifaces)
                         continue;
@@ -525,14 +525,14 @@ static void tx(int index, int count)
                 dev             = &connected[lookup->device_index];
 
                 ret = icsneoTxMessages(dev->handle, msg, lookup->netid, 1);
-                
+
                 if (ret == 0)
                 {
-                        LOG(LOG_ERR, "error transmitting on device %d\n", 
+                        LOG(LOG_ERR, "error transmitting on device %d\n",
                                 dev->device.SerialNumber);
-                        
+
                         pthread_mutex_lock(&devices_mutex);
-                        free_connected_device(dev, 1); 
+                        free_connected_device(dev, 1);
                         pthread_mutex_unlock(&devices_mutex);
 
                         break;
@@ -556,14 +556,14 @@ static void* probe_device_thread(void* arg)
 int main(int argc, char **argv)
 {
         int opt, ret, i, opened_devices = 0;
-        unsigned long last_probe = 0; 
+        unsigned long last_probe = 0;
         fd_set fds;
         struct timeval timeout;
         struct timespec clock;
         pthread_t probe_thread;
 
         /* process command line switches */
-        while ((opt = getopt(argc, argv, "hF")) != -1) 
+        while ((opt = getopt(argc, argv, "hD")) != -1)
         {
                 switch(opt)
                 {
@@ -571,44 +571,44 @@ int main(int argc, char **argv)
                         run_as_daemon = 1;
                         break;
                 case 'h':
-		case '?':
-		default:
-			print_usage(argv[0]);
-			break;
+                case '?':
+                default:
+                        print_usage(argv[0]);
+                        break;
                 }
         }
-        
+
         /* setup logging, signals, and daemonize if requested */
         openlog(DAEMON_NAME, LOG_PID, LOG_LOCAL5);
-        if (run_as_daemon) 
+        if (run_as_daemon)
         {
-		if (daemon(0, 0)) 
+                if (daemon(0, 0))
                 {
-			LOG_NOARGS(LOG_ERR, "failed to daemonize");
-			exit(EXIT_FAILURE);
-		}
-	}
-	else 
+                        LOG_NOARGS(LOG_ERR, "failed to daemonize");
+                        exit(EXIT_FAILURE);
+                }
+        }
+        else
         {
-		signal(SIGINT, signal_handler);
-		signal(SIGTERM, signal_handler);
-	}
-        
+                signal(SIGINT, signal_handler);
+                signal(SIGTERM, signal_handler);
+        }
+
         /* we're now "running" -- incoming signals tell us to stop */
         icsscand_running = 1;
 
         /* this is the lock for adding/removing devices from the connected array */
         pthread_mutex_init(&devices_mutex, NULL);
-        
+
         icsneoInitializeAPI();
-        
+
         /* open /dev/intrepid_netdevice -- this has ioctls for adding can interfaces */
         netdevice = open(NETDEVICE_PATH, O_RDWR | O_NONBLOCK);
         if (netdevice < 0)
         {
                 LOG(LOG_ERR, "failed to open %s: %s\n", NETDEVICE_PATH, strerror(errno));
                 exit(EXIT_FAILURE);
-        } 
+        }
 
         /* read out some constants from the driver (these are #defines that can change) */
         max_num_ifaces = ioctl(netdevice, SIOCGMAXIFACES);
@@ -639,7 +639,7 @@ int main(int argc, char **argv)
         connected = (struct connected_device_t*)
                 malloc(sizeof(struct connected_device_t) * max_num_ifaces);
         memset(connected, 0, sizeof(struct connected_device_t) * max_num_ifaces);
-        
+
         /* the NetworkID of transmit requests is the interface index, we need to
          * convert it to the device/netid pair to transmit on -- allocate this map */
         netid_lookup = (struct netid_lookup_t*)
@@ -649,7 +649,7 @@ int main(int argc, char **argv)
 
         /* probe once for new devices, then start a thread to do it in the background
          * periodically */
-        probe_new_devices(netdevice); 
+        probe_new_devices(netdevice);
         pthread_create(&probe_thread, NULL, probe_device_thread, NULL);
 
         /* main loop. icsscand_running can be set to 0 from SIGINT, SIGTERM, etc. */
@@ -672,7 +672,7 @@ int main(int argc, char **argv)
                 }
                 else if(ret)
                 {
-                        /* kernel says there're some new transmit messages waiting to go 
+                        /* kernel says there're some new transmit messages waiting to go
                          * out. call read() to find out which box they're in and how many */
                         struct intrepid_pending_tx_info info;
                         ssize_t r;
@@ -680,14 +680,14 @@ int main(int argc, char **argv)
                         r = read(netdevice, &info, sizeof(info));
                         if (r == -1)
                         {
-                                LOG(LOG_ERR, "error reading tx messages: %s\n", 
+                                LOG(LOG_ERR, "error reading tx messages: %s\n",
                                         strerror(errno));
                                 icsscand_running = 0;
                                 break;
                         }
                         else if(r != sizeof(info))
                         {
-                                LOG(LOG_ERR, 
+                                LOG(LOG_ERR,
                                         "unexpected number of bytes read, expected %d got %d\n",
                                         (int)sizeof(info), (int)r);
                                 icsscand_running = 0;
