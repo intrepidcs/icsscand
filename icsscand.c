@@ -392,15 +392,14 @@ static void probe_new_devices()
                 /* figure out how many interfaces we need to make */
                 switch(device->device.DeviceType)
                 {
+				case NEODEVICE_VCAN41:
+				case NEODEVICE_VCAN42:
                 case NEODEVICE_VCAN3:
                         num_nets = 2;
                         break;
                 case NEODEVICE_FIRE:
-                case NEODEVICE_PLASMA_1_11:
-                case NEODEVICE_PLASMA_1_12:
-                case NEODEVICE_PLASMA_1_13:
-                case NEODEVICE_ION_2:
-                case NEODEVICE_ION_3:
+                case NEODEVICE_ANY_ION:
+                case NEODEVICE_ANY_PLASMA:
                         /* some ions and plasmas actually have 8,
                         *  but we can't tell from the PID */
                         num_nets = 6;
@@ -448,16 +447,15 @@ static void probe_new_devices()
                         device->netid_to_interface[j] = -1;
                 switch(device->device.DeviceType)
                 {
+				case NEODEVICE_VCAN41:
+				case NEODEVICE_VCAN42:
                 case NEODEVICE_VCAN3:
                         setup_interface_info(device_index, NETID_HSCAN,   0, "can0");
                         setup_interface_info(device_index, NETID_MSCAN,   1, "can1");
                         break;
                 case NEODEVICE_FIRE:
-                case NEODEVICE_PLASMA_1_11:
-                case NEODEVICE_PLASMA_1_12:
-                case NEODEVICE_PLASMA_1_13:
-                case NEODEVICE_ION_2:
-                case NEODEVICE_ION_3:
+                case NEODEVICE_ANY_PLASMA:
+                case NEODEVICE_ANY_ION:
                         setup_interface_info(device_index, NETID_HSCAN,   0, "can0");
                         setup_interface_info(device_index, NETID_MSCAN,   1, "can1");
                         setup_interface_info(device_index, NETID_HSCAN2,  2, "can2");
