@@ -343,9 +343,10 @@ static void probe_new_devices()
 {
         NeoDevice *detected = (NeoDevice*)malloc(sizeof(NeoDevice) * max_num_ifaces);
         int num_devices = max_num_ifaces, i;
-
+        const unsigned long device_types = NEODEVICE_VCAN41 | NEODEVICE_VCAN42 | NEODEVICE_VCAN3 
+                | NEODEVICE_FIRE | NEODEVICE_ANY_ION | NEODEVICE_ANY_PLASMA | NEODEVICE_FIRE2;
         /* find all the connected devices */
-        int ret = icsneoFindNeoDevices(NEODEVICE_ALL & ~NEODEVICE_RADGALAXY, detected, &num_devices);
+        int ret = icsneoFindNeoDevices(device_types, detected, &num_devices);
         if (ret == 0 || num_devices == 0)
         {
                 free(detected);
@@ -392,8 +393,8 @@ static void probe_new_devices()
                 /* figure out how many interfaces we need to make */
                 switch(device->device.DeviceType)
                 {
-				case NEODEVICE_VCAN41:
-				case NEODEVICE_VCAN42:
+		case NEODEVICE_VCAN41:
+		case NEODEVICE_VCAN42:
                 case NEODEVICE_VCAN3:
                         num_nets = 2;
                         break;
