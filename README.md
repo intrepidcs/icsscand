@@ -1,21 +1,29 @@
-This is the user mode daemon for Intrepid Control Systems' SocketCAN support. This daemon requires that ```intrepid.ko``` is loaded on your system. For instructions on building and loading the kernel object, see [intrepid-socketcan-kernel-module](https://github.com/intrepidcs/intrepid-socketcan-kernel-module). In addition, you will need a version of ```libicsneoapi```. For the purposes of SocketCAN support the open source version will suffice; see [libicsneoapi](https://github.com/intrepidcs/icsneoapi). 
+Version 2.0.0
 
-To build, simply run ```make```.
+This is the usermode daemon for the Intrepid Control Systems SocketCAN support. This daemon requires that ```intrepid.ko``` is loaded on your system.
 
-```
-$ make
-```
+1. Build and load the kernel module follwowing the instructions in [intrepid-socketcan-kernel-module](https://github.com/intrepidcs/intrepid-socketcan-kernel-module).
 
-To enable SocketCAN for your attached Intrepid devices, run the daemon. Use ```-D``` to run as a daemon, or pass no arguments to run in the foreground.
+2. Install the dependencies needed. These are CMake 3.2+, GCC 4.8+, git, and libusb-1.0-0-dev.
 
-```
-$ sudo ./icsscand -D
-```
+On Ubuntu or other Debian-based systems, run `sudo apt install git cmake gcc libusb-1.0-0-dev build-essential`.
 
-Most Intrepid devices support more than one CAN channel. Your interfaces will be named ```icsXcan_typeY``` where ```X``` is an incrementing identifier for different devices, ```can_type``` identifies the type of CAN channel, and ```Y``` is an incrementing identifier for each device. For example, the first neoVI FIRE you plug into your system will create the interfaces ```ics0can0```, ```ics0can1```, ```ics0can2```, ```ics0can3```, ```ics0lsftcan0```, ```ics0swcan0```.
+3. Clone this repository recursively by running `git clone --recursive https://github.com/intrepidcs/icsscand.git`
 
-Before you can read or write messages on an interface you'll need to bring it up
+4. Switch into the cloned directory, `cd icsscand`
 
-```
-$ sudo ifconfig ics0can0 up
-```
+5. Make a build directory, `mkdir build`
+
+6. Invoke CMake, `cmake .. -DCMAKE_BUILD_TYPE=Release`
+
+7. Build the daemon, `make`
+
+8. The daemon is now available as `libicsneo-socketcan-daemon`
+
+9. Start the daemon up to begin connecting to devices. Use `sudo ./libicsneo-socketcan-daemon`. If you're happy with the results and would like to run in the background, run `sudo ./libicsneo-socketcan-daemon -d` to run in daemon mode.
+
+10. CAN interfaces will have been created, but are "down" or, in other words, not enabled for transmit and receive yet. You can see them with `ip link`. They will be labelled `can0`, `can1`, and etc. They will have an alias listed which corresponds to the serial number of the device and network on that device.
+
+11. Enable the CAN interface with `sudo ip link set up can0`, replacing `can0` with whichever interface you'd like to enable
+
+12. You can now use any SocketCAN application with this interface. A good package for testing is the `can-utils` package. You can get this package with `sudo apt install can-utils`. A good testing tool which comes with this package is `candump`. Running `candump can0` will print a line for every incoming frame.

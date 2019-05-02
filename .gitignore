@@ -1,6 +1,6 @@
-*.a
-*.o
-icsneo_sample
-*.log
-icsscand
-.vscode/
+build/
+build*/
+.DS_Store
+Thumbs.db
+.vscode
+*.bak
