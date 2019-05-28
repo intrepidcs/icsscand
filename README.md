@@ -12,7 +12,7 @@ On Ubuntu or other Debian-based systems, run `sudo apt install git cmake gcc lib
 
 4. Switch into the cloned directory, `cd icsscand`
 
-5. Make a build directory, `mkdir build`
+5. Make a build directory and switch into it, `mkdir -p build && cd build`
 
 6. Invoke CMake, `cmake .. -DCMAKE_BUILD_TYPE=Release`
 
