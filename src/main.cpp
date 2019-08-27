@@ -451,9 +451,8 @@ int main(int argc, char** argv) {
 		FD_ZERO(&fds);
 		FD_SET(driver, &fds);
 
-		struct timeval timeout;
-		timeout.tv_sec = 0;
-		timeout.tv_usec = 1000 * 1000; // 1s
+		struct timeval timeout = {};
+		timeout.tv_sec = 1;
 
 		auto ret = select(driver + 1, &fds, NULL, NULL, &timeout);
 		if(ret == -1) {
