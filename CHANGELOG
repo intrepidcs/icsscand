@@ -1,0 +1,7 @@
+v2.0.1
+	Set timeout tv_sec instead of tv_usec for compatibility with older kernels
+
+v2.0.0
+	Full rewrite
+	Initial release with CAN-FD support
+	Requires intrepid-socketcan-kernel-module >= v2.0.0
