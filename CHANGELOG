@@ -1,3 +1,6 @@
+v2.0.2
+	Use libicsneo v0.1.2 to resolve LEDs not indicating device status
+
 v2.0.1
 	Set timeout tv_sec instead of tv_usec for compatibility with older kernels
 
