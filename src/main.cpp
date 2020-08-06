@@ -275,6 +275,7 @@ void searchForDevices() {
 				return;
 			auto canMessage = std::static_pointer_cast<icsneo::CANMessage>(message);
 			const OpenDevice* openDevice = nullptr;
+			std::lock_guard<std::mutex> lg(openDevicesMutex);
 			for(const auto& dev : openDevices) {
 				if(dev.device->getSerial() == serial) {
 					openDevice = &dev;
@@ -482,6 +483,7 @@ int main(int argc, char** argv) {
 					msg->data = currentPosition;
 					currentPosition += msg->length;
 					bool sent = false;
+					std::lock_guard<std::mutex> lg(openDevicesMutex);
 					for(auto& dev : openDevices) {
 						for(auto& netifPair : dev.interfaces) {
 							if(netifPair.second->getKernelHandle() != msg->netid)
