@@ -1,3 +1,8 @@
+v2.0.3
+	Update copyright date
+	Update to libicsneo v0.2.0
+	Ensure lock is held when accessing open devices
+
 v2.0.2
 	Use libicsneo v0.1.2 to resolve LEDs not indicating device status
 
