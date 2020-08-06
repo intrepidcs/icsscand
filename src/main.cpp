@@ -223,9 +223,8 @@ void searchForDevices() {
 		});
 		if(!newDevice.device->open() || !newDevice.device->goOnline()) {
 			if(firstTimeFailedToOpen) {
-				icsneo::APIError err;
-				icsneo::GetLastError(err);
-				LOGF(LOG_INFO, "%s failed to connect. Will keep trying...\n%s\n", newDevice.device->describe().c_str(), err.describe().c_str());
+				const std::string err = icsneo::GetLastError().describe();
+				LOGF(LOG_INFO, "%s failed to connect. Will keep trying...\n%s\n", newDevice.device->describe().c_str(), err.c_str());
 				failedToOpen.push_back(serial);
 			}
 			continue;
@@ -321,7 +320,7 @@ void searchForDevices() {
 		openDevices.end()
 	);
 
-	for(const auto& err : icsneo::GetErrors()) {
+	for(const auto& err : icsneo::GetEvents()) {
 		bool forErrorDevice = false;
 		for(const auto& dev : failedToOpen) {
 			if(err.isForDevice(dev)) {
