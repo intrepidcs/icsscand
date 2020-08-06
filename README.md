@@ -4,15 +4,15 @@ This is the usermode daemon for the Intrepid Control Systems SocketCAN support. 
 
 1. Build and load the kernel module follwowing the instructions in [intrepid-socketcan-kernel-module](https://github.com/intrepidcs/intrepid-socketcan-kernel-module).
 
-2. Install the dependencies needed. These are CMake 3.2+, GCC 4.8+, git, and libusb-1.0-0-dev.
+2. Install the dependencies needed. These are CMake 3.2+, GCC 4.8+, git, libusb-1.0-0-dev, and libpcap.
 
-On Ubuntu or other Debian-based systems, run `sudo apt install git cmake gcc libusb-1.0-0-dev build-essential`.
+On Ubuntu or other Debian-based systems, run `sudo apt install git cmake gcc libusb-1.0-0-dev libpcap-dev build-essential`.
 
 3. Clone this repository recursively by running `git clone --recursive https://github.com/intrepidcs/icsscand.git`
 
 4. Switch into the cloned directory, `cd icsscand`
 
-5. Make a build directory and switch into it, `mkdir -p build && cd build`
+5. Make a build directory and switch into it, `mkdir build && cd build`
 
 6. Invoke CMake, `cmake .. -DCMAKE_BUILD_TYPE=Release`
 
