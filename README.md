@@ -24,6 +24,6 @@ On Ubuntu or other Debian-based systems, run `sudo apt install git cmake gcc lib
 
 10. CAN interfaces will have been created, but are "down" or, in other words, not enabled for transmit and receive yet. You can see them with `ip link`. They will be labelled `can0`, `can1`, and etc. They will have an alias listed which corresponds to the serial number of the device and network on that device.
 
-11. Enable the CAN interface with `sudo ip link set up can0`, replacing `can0` with whichever interface you'd like to enable
+11. Enable the CAN interface with `sudo ip link set can0 up`, replacing `can0` with whichever interface you'd like to enable
 
 12. You can now use any SocketCAN application with this interface. A good package for testing is the `can-utils` package. You can get this package with `sudo apt install can-utils`. A good testing tool which comes with this package is `candump`. Running `candump can0` will print a line for every incoming frame.
