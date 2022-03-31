@@ -49,6 +49,7 @@ int driverPatch = 0;
 int maxInterfaces = 0; // From driver
 int sharedMemSize = 0; // From driver
 void* sharedMemory = nullptr;
+std::string serialFilter;
 
 std::atomic<bool> stopRunning(false);
 
@@ -193,6 +194,7 @@ void usage(std::string executableName) {
 	std::cerr << "\t-d,     --daemon\t\tRun as a daemon in the background\n";
 	std::cerr << "\t-h, -?, --help, --usage\t\tShow this help page\n";
 	std::cerr << "\t        --devices\t\tList supported devices\n";
+	std::cerr << "\t        --filter <serial>\tOnly connect to devices with serial\n\t\t\t\t\tnumbers starting with this filter\n";
 }
 
 void terminateSignal(int signal) {
@@ -215,9 +217,14 @@ void searchForDevices() {
 		if(alreadyOpen)
 			continue;
 
+		const std::string serial = dev->getSerial();
+
+		// If we have a serial filter, make sure our serial starts with the given filter
+		if(!serialFilter.empty() && serial.rfind(serialFilter, 0) != 0)
+			continue;
+
 		// Now open the device
 		OpenDevice newDevice(dev);
-		const std::string serial = newDevice.device->getSerial();
 		Lazy<bool> firstTimeFailedToOpen([&serial]() {
 			return std::find(failedToOpen.begin(), failedToOpen.end(), serial) == failedToOpen.end();
 		});
@@ -344,13 +351,8 @@ void deviceSearchThread() {
 }
 
 int main(int argc, char** argv) {
-	if(argc > 2) {
-		usage(argv[0]);
-		return EX_USAGE;
-	}
-
-	if(argc == 2) {
-		const std::string arg = argv[1];
+	for(int i = 1; i != argc; i++) {
+		const std::string arg = argv[i];
 		if(arg == "-d" || arg == "--daemon") {
 			runningAsDaemon = true;
 		} else if(arg == "-h" || arg == "--help" || arg == "-?" || arg == "--usage") {
@@ -362,6 +364,9 @@ int main(int argc, char** argv) {
 			for(auto& dev : icsneo::GetSupportedDevices())
 				std::cout << '\t' << dev << std::endl;
 			return EXIT_SUCCESS;
+		} else if(arg == "--filter" && i + 1 <= argc) {
+			serialFilter = argv[++i];
+			transform(serialFilter.begin(), serialFilter.end(), serialFilter.begin(), ::toupper);
 		} else {
 			usage(argv[0]);
 			return EX_USAGE;
