@@ -277,8 +277,6 @@ void searchForDevices() {
 
 		// Create rx listener
 		newDevice.device->addMessageCallback(icsneo::CANMessageCallback([serial](std::shared_ptr<icsneo::Message> message) {
-			if(message->transmitted)
-				return;
 			auto canMessage = std::static_pointer_cast<icsneo::CANMessage>(message);
 			const OpenDevice* openDevice = nullptr;
 			std::lock_guard<std::mutex> lg(openDevicesMutex);
