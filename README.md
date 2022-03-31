@@ -1,4 +1,4 @@
-Version 2.0.3
+Version 2.1.0
 
 This is the usermode daemon for the Intrepid Control Systems SocketCAN support. This daemon requires that ```intrepid.ko``` is loaded on your system.
 

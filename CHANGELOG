@@ -1,3 +1,9 @@
+v2.1.0
+	Update copyright date
+	Update to libicsneo v0.3.0
+	Report transmits down to the kernel for echo
+	Allow filtering devices by serial number
+
 v2.0.3
 	Update copyright date
 	Update to libicsneo v0.2.0
