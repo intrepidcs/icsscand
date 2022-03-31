@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.2)
-project(libicsneo-socketcan-daemon VERSION 2.0.3)
+project(libicsneo-socketcan-daemon VERSION 2.1.0)
 
-set(CMAKE_CXX_STANDARD 11)
+set(CMAKE_CXX_STANDARD 17)
 
 include(GNUInstallDirs)
 

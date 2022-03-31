@@ -20,6 +20,8 @@
 
 #include <icsneo/icsneocpp.h>
 #include <icsneo/communication/message/neomessage.h>
+#include <icsneo/communication/message/message.h>
+#include <icsneo/communication/network.h>
 #include <icsneo/communication/message/callback/canmessagecallback.h>
 #include <generated/buildinfo.h>
 
@@ -86,8 +88,15 @@ public:
 	const std::string& getName() const { return name; }
 	uint8_t* getRxBox() { return rxBox; }
 	const uint8_t* getRxBox() const { return rxBox; }
-	void addReceivedMessageToQueue(const std::shared_ptr<icsneo::Message>& msg) {
-		auto neomessage = icsneo::CreateNeoMessage(msg);
+	void addReceivedMessageToQueue(const std::shared_ptr<icsneo::CANMessage>& msg) {
+		const auto neomessageGeneric = icsneo::CreateNeoMessage(msg);
+		if (neomessageGeneric.messageType != neomessagetype_t(icsneo::Message::Type::Frame)) {
+			LOG(LOG_DEBUG, "could not create a neomessage_can_t\n");
+			return;
+		}
+
+		const auto& neomessage = *reinterpret_cast<const neomessage_can_t*>(&neomessageGeneric);
+
 		size_t bytesNeeded = sizeof(neomessage) + neomessage.length;
 		std::lock_guard<std::mutex> lg(rxBoxLock);
 		if(ssize_t((rxBoxCurrentPosition - rxBox) + bytesNeeded) > RX_BOX_SIZE) {
@@ -480,10 +489,16 @@ int main(int argc, char** argv) {
 				// Send!
 				uint8_t* currentPosition = GET_TX_BOX(info.tx_box_index);
 				while(info.count--) {
-					neomessage_t* msg = reinterpret_cast<neomessage_t*>(currentPosition);
-					currentPosition += sizeof(neomessage_t);
+					neomessage_frame_t* msg = reinterpret_cast<neomessage_frame_t*>(currentPosition);
+					currentPosition += sizeof(neomessage_frame_t);
 					msg->data = currentPosition;
 					currentPosition += msg->length;
+
+					if(msg->type != neonettype_t(icsneo::Network::Type::CAN)) {
+						LOG(LOG_ERR, "Message dropped, kernel sent a non-CAN message\n");
+						continue;
+					}
+
 					bool sent = false;
 					std::lock_guard<std::mutex> lg(openDevicesMutex);
 					for(auto& dev : openDevices) {
@@ -491,8 +506,9 @@ int main(int argc, char** argv) {
 							if(netifPair.second->getKernelHandle() != msg->netid)
 								continue;
 							msg->netid = static_cast<uint16_t>(netifPair.first);
-							auto tx = icsneo::CreateMessageFromNeoMessage(msg);
-							if(!dev.device->transmit(tx))
+							auto txMsg = icsneo::CreateMessageFromNeoMessage(reinterpret_cast<neomessage_t*>(msg));
+							auto tx = std::dynamic_pointer_cast<icsneo::Frame>(txMsg);
+							if(!tx || !dev.device->transmit(tx))
 								break;
 							sent = true;
 							break;
