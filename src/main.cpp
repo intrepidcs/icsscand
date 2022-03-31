@@ -197,7 +197,7 @@ void header() {
 
 void usage(std::string executableName) {
 	std::cerr << "The libicsneo SocketCAN Usermode Daemon\n";
-	std::cerr << "Copyright 2019-2020 Intrepid Control Systems, Inc.\n\n";
+	std::cerr << "Copyright 2019-2022 Intrepid Control Systems, Inc.\n\n";
 	std::cerr << "Usage: " << executableName << " [option]\n\n";
 	std::cerr << "Options:\n";
 	std::cerr << "\t-d,     --daemon\t\tRun as a daemon in the background\n";
