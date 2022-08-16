@@ -25,23 +25,25 @@
 #include <icsneo/communication/message/callback/canmessagecallback.h>
 #include <generated/buildinfo.h>
 
-#define LOG(LVL, MSG)              do{if(runningAsDaemon) syslog(LVL, MSG); \
-                                    else fprintf(stderr, MSG);}while(0)
-#define LOGF(LVL, MSG, ...)        do{if(runningAsDaemon) syslog(LVL, MSG, __VA_ARGS__); \
-                                    else fprintf(stderr, MSG, __VA_ARGS__);}while(0)
+#define LOG(LVL, MSG)			do{if(runningAsDaemon) syslog(LVL, MSG); \
+					else fprintf(stderr, MSG);}while(0)
+#define LOGF(LVL, MSG, ...)		do{if(runningAsDaemon) syslog(LVL, MSG, __VA_ARGS__); \
+					else fprintf(stderr, MSG, __VA_ARGS__);}while(0)
 
-#define SIOCSADDIF                 0x3001
-#define SIOCSREMOVEIF              0x3002
-#define SIOCGSHAREDMEMSIZE         0x3003
-#define SIOCSMSGSWRITTEN           0x3004
-#define SIOCGMAXIFACES             0x3005
-#define SIOCGVERSION               0x3006
-#define SIOCGCLIENTVEROK           0x3007
+#define SIOCSADDCANIF			0x3001
+#define SIOCSADDETHIF			0x3002
+#define SIOCSREMOVECANIF		0x3003
+#define SIOCSREMOVEETHIF		0x3004
+#define SIOCGSHAREDMEMSIZE		0x3005
+#define SIOCSMSGSWRITTEN		0x3006
+#define SIOCGMAXIFACES			0x3007
+#define SIOCGVERSION			0x3008
+#define SIOCGCLIENTVEROK		0x3009
 
-#define RX_BOX_SIZE                (sharedMemSize / (maxInterfaces * 2))
-#define TX_BOX_SIZE                (sharedMemSize / 4)
-#define GET_RX_BOX(DEVICE_INDEX)   (reinterpret_cast<uint8_t*>(sharedMemory) + (RX_BOX_SIZE * DEVICE_INDEX))
-#define GET_TX_BOX(INDEX)          (reinterpret_cast<uint8_t*>(sharedMemory) + (sharedMemSize / 2) + (INDEX * TX_BOX_SIZE))
+#define RX_BOX_SIZE			(sharedMemSize / (maxInterfaces * 2))
+#define TX_BOX_SIZE			(sharedMemSize / 4)
+#define GET_RX_BOX(DEVICE_INDEX)	(reinterpret_cast<uint8_t*>(sharedMemory) + (RX_BOX_SIZE * DEVICE_INDEX))
+#define GET_TX_BOX(INDEX)		(reinterpret_cast<uint8_t*>(sharedMemory) + (sharedMemSize / 2) + (INDEX * TX_BOX_SIZE))
 
 bool runningAsDaemon = false;
 int driver = 0; // /dev/intrepid_netdevice
@@ -63,10 +65,16 @@ struct intrepid_pending_tx_info {
 
 class NetworkInterface {
 public:
-	NetworkInterface(const std::string& desiredName) : name(desiredName) {
+	NetworkInterface(const std::string& desiredName, icsneo::Network::Type device) : type(device), name(desiredName) {
 		char ifname[IFALIASZ + 1] = {0};
 		strncpy(ifname, name.c_str(), IFALIASZ);
-		kernelHandle = ioctl(driver, SIOCSADDIF, ifname);
+
+		if(device == icsneo::Network::Type::CAN) {
+			kernelHandle = ioctl(driver, SIOCSADDCANIF, ifname); // this will call the intrepid_dev_ioctl()
+		} else if(device == icsneo::Network::Type::Ethernet) {
+			kernelHandle = ioctl(driver, SIOCSADDETHIF, ifname); // this will call the intrepid_dev_ioctl()
+		}
+
 		if(openedSuccessfully()) {
 			rxBox = GET_RX_BOX(kernelHandle);
 			rxBoxCurrentPosition = rxBox;
@@ -74,8 +82,13 @@ public:
 	}
 	~NetworkInterface() {
 		if(openedSuccessfully()) {
+			int res = 0;
 			LOGF(LOG_DEBUG, "Removing device %s with handle %d\n", name.c_str(), kernelHandle);
-			int res = ioctl(driver, SIOCSREMOVEIF, kernelHandle);
+			if(type == icsneo::Network::Type::CAN) {
+				res = ioctl(driver, SIOCSREMOVECANIF, kernelHandle);
+			} else if(type == icsneo::Network::Type::Ethernet) {
+				res = ioctl(driver, SIOCSREMOVEETHIF, kernelHandle);
+			}
 			LOGF(LOG_DEBUG, "Removed device %s with handle %d, result %d\n", name.c_str(), kernelHandle, res);
 		} else
 			LOG(LOG_DEBUG, "Removing interface which was not opened successfully\n");
@@ -88,36 +101,42 @@ public:
 	const std::string& getName() const { return name; }
 	uint8_t* getRxBox() { return rxBox; }
 	const uint8_t* getRxBox() const { return rxBox; }
-	void addReceivedMessageToQueue(const std::shared_ptr<icsneo::CANMessage>& msg) {
+
+	template<typename T>
+	void addReceivedMessageToQueue(const std::shared_ptr<icsneo::Frame>& msg) {
 		const auto neomessageGeneric = icsneo::CreateNeoMessage(msg);
-		if (neomessageGeneric.messageType != neomessagetype_t(icsneo::Message::Type::Frame)) {
+		if(neomessageGeneric.messageType != neomessagetype_t(icsneo::Message::Type::Frame)) {
 			LOG(LOG_DEBUG, "could not create a neomessage_can_t\n");
 			return;
 		}
 
-		const auto& neomessage = *reinterpret_cast<const neomessage_can_t*>(&neomessageGeneric);
+		if(msg->network.getType() == icsneo::Network::Type::CAN || msg->network.getType() == icsneo::Network::Type::Ethernet) {
 
-		size_t bytesNeeded = sizeof(neomessage) + neomessage.length;
-		std::lock_guard<std::mutex> lg(rxBoxLock);
-		if(ssize_t((rxBoxCurrentPosition - rxBox) + bytesNeeded) > RX_BOX_SIZE) {
-			// fail, too big!
-			LOG(LOG_DEBUG, "box too small\n");
-			return;
+			const auto& neomessage = *reinterpret_cast<const T*>(&neomessageGeneric);
+
+			size_t bytesNeeded = sizeof(neomessage) + neomessage.length;
+			std::lock_guard<std::mutex> lg(rxBoxLock);
+			if(ssize_t((rxBoxCurrentPosition - rxBox) + bytesNeeded) > RX_BOX_SIZE) {
+				// fail, too big!
+				LOG(LOG_DEBUG, "box too small\n");
+				return;
+			}
+			memcpy(rxBoxCurrentPosition, &neomessage, sizeof(neomessage));
+			rxBoxCurrentPosition += sizeof(neomessage);
+			memcpy(rxBoxCurrentPosition, neomessage.data, neomessage.length);
+			rxBoxCurrentPosition += neomessage.length;
+			rxBoxMessageCount++;
+			if(ioctl(driver, SIOCSMSGSWRITTEN, (kernelHandle << 16) | rxBoxMessageCount) < 0) {
+				LOGF(LOG_DEBUG, "send ioctl failed %d %zu\n", kernelHandle, rxBoxMessageCount);
+				return;
+			}
+			rxBoxCurrentPosition = rxBox;
+			rxBoxMessageCount = 0;
 		}
-		memcpy(rxBoxCurrentPosition, &neomessage, sizeof(neomessage));
-		rxBoxCurrentPosition += sizeof(neomessage);
-		memcpy(rxBoxCurrentPosition, neomessage.data, neomessage.length);
-		rxBoxCurrentPosition += neomessage.length;
-		rxBoxMessageCount++;
-		if(ioctl(driver, SIOCSMSGSWRITTEN, (kernelHandle << 16) | rxBoxMessageCount) < 0) {
-			LOGF(LOG_DEBUG, "send ioctl failed %d %zu\n", kernelHandle, rxBoxMessageCount);
-			return;
-		}
-		rxBoxCurrentPosition = rxBox;
-		rxBoxMessageCount = 0;
 	}
 
 private:
+	icsneo::Network::Type type;
 	std::string name;
 	int kernelHandle = -1;
 	std::mutex rxBoxLock;
@@ -245,28 +264,29 @@ void searchForDevices() {
 			}
 			continue;
 		}
-		
-		// Get the supported CAN networks
+
+		// Get the supported networks
 		auto supportedNetworks = newDevice.device->getSupportedRXNetworks();
 		supportedNetworks.erase(std::remove_if(supportedNetworks.begin(), supportedNetworks.end(), [](const icsneo::Network& net) -> bool {
-			return net.getType() != icsneo::Network::Type::CAN;// Only want CAN networks
+			return net.getType() != icsneo::Network::Type::CAN && net.getType() != icsneo::Network::Type::Ethernet;
 		}), supportedNetworks.end());
 		if(supportedNetworks.empty()) {
 			if(firstTimeFailedToOpen) {
-				LOGF(LOG_INFO, "%s has no supported CAN networks\n", newDevice.device->describe().c_str());
+				LOGF(LOG_INFO, "%s has no supported networks\n", newDevice.device->describe().c_str());
 				failedToOpen.push_back(serial);
 			}
 			continue;
 		}
 
-		// Create a network interface for each CAN network
+		// Create a network interface for each network
 		for(const auto& net : supportedNetworks) {
 			std::stringstream ss;
 			ss << sanitizeInterfaceName(icsneo::Network::GetNetIDString(net.getNetID())) << "_" << serial;
 			std::string interfaceName(ss.str());
 			if(firstTimeFailedToOpen)
 				LOGF(LOG_INFO, "Creating network interface %s\n", interfaceName.c_str());
-			newDevice.interfaces[net.getNetID()] = std::make_shared<NetworkInterface>(interfaceName);
+
+			newDevice.interfaces[net.getNetID()] = std::make_shared<NetworkInterface>(interfaceName, net.getType());
 			LOGF(LOG_INFO, "Created network interface %s\n", interfaceName.c_str());
 		}
 		bool failedToCreateNetworkInterfaces = false;
@@ -285,8 +305,9 @@ void searchForDevices() {
 		}
 
 		// Create rx listener
-		newDevice.device->addMessageCallback(icsneo::CANMessageCallback([serial](std::shared_ptr<icsneo::Message> message) {
-			auto canMessage = std::static_pointer_cast<icsneo::CANMessage>(message);
+		newDevice.device->addMessageCallback(icsneo::MessageCallback([serial](std::shared_ptr<icsneo::Message> message) {
+			const auto frame = std::static_pointer_cast<icsneo::Frame>(message);
+			const auto messageType = frame->network.getType();
 			const OpenDevice* openDevice = nullptr;
 			std::lock_guard<std::mutex> lg(openDevicesMutex);
 			for(const auto& dev : openDevices) {
@@ -295,13 +316,17 @@ void searchForDevices() {
 					break;
 				}
 			}
-			if(!openDevice) {
-				LOG(LOG_ERR, "Dropping message, no open device\n");
+			if(frame->type != icsneo::Message::Type::Frame) {
+				LOG(LOG_ERR, "Dropping message: received invalid message type, expected RawMessage\n");
 				return;
 			}
 
-			// todo might throw
-			openDevice->interfaces.at(canMessage->network.getNetID())->addReceivedMessageToQueue(canMessage);
+			if(messageType == icsneo::Network::Type::CAN) {
+				openDevice->interfaces.at(frame->network.getNetID())->addReceivedMessageToQueue<neomessage_can_t>(frame);
+			} else if(messageType == icsneo::Network::Type::Ethernet) {
+				openDevice->interfaces.at(frame->network.getNetID())->addReceivedMessageToQueue<neomessage_eth_t>(frame);
+			} else
+				LOG(LOG_ERR, "Dropping message, only CAN and Ethernet are currently supported\n");
 		}));
 
 		LOGF(LOG_INFO, "%s connected\n", newDevice.device->describe().c_str());
@@ -417,7 +442,7 @@ int main(int argc, char** argv) {
 		return EXIT_FAILURE;
 	}
 	std::cout << "Driver v" << driverMajor << '.' << driverMinor << '.' << driverPatch << "\n\n";
-	if(driverMajor > 2) {
+	if(driverMajor > 3) {
 		LOG(LOG_ERR, "This version of the usermode daemon is too old to work with this driver\nPlease ensure that both the usermode daemon and kernel driver are up to date\n");
 		return EXIT_FAILURE;
 	}
@@ -457,7 +482,7 @@ int main(int argc, char** argv) {
 	}
 
 	std::thread searchThread(deviceSearchThread);
-	
+
 	while(!stopRunning) {
 		fd_set fds;
 		FD_ZERO(&fds);
@@ -477,7 +502,7 @@ int main(int argc, char** argv) {
 			// Call read() to find out which box they're in and how many
 			struct intrepid_pending_tx_info info;
 			ssize_t r = read(driver, &info, sizeof(info));
-			if (r == -1) {
+			if(r == -1) {
 				LOGF(LOG_ERR, "Error waiting for tx messages: %s\n", strerror(errno));
 				stopRunning = true;
 				break;
@@ -494,8 +519,8 @@ int main(int argc, char** argv) {
 					msg->data = currentPosition;
 					currentPosition += msg->length;
 
-					if(msg->type != neonettype_t(icsneo::Network::Type::CAN)) {
-						LOG(LOG_ERR, "Message dropped, kernel sent a non-CAN message\n");
+					if(msg->type != neonettype_t(icsneo::Network::Type::CAN) && msg->type != neonettype_t(icsneo::Network::Type::Ethernet)) {
+						LOG(LOG_ERR, "Message dropped, kernel sent a non-CAN/Ethernet message\n");
 						continue;
 					}
 
