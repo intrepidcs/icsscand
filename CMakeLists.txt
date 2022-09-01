@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.2)
-project(libicsneo-socketcan-daemon VERSION 2.1.0)
+project(libicsneo-socketcan-daemon VERSION 3.0.0)
 
 set(CMAKE_CXX_STANDARD 17)
 
