@@ -199,7 +199,7 @@ std::string sanitizeInterfaceName(std::string str) {
 
 void header() {
 	std::cout << "The libicsneo SocketCAN Usermode Daemon\n";
-	std::cout << "Copyright Intrepid Control Systems, Inc. 2019\n\n";
+	std::cout << "Copyright Intrepid Control Systems, Inc. 2023\n\n";
 	std::cout << "Daemon v";
 	std::cout << (int)ICSNEO_SOCKETCAN_BUILD_MAJOR << '.' << (int)ICSNEO_SOCKETCAN_BUILD_MINOR << '.' << (int)ICSNEO_SOCKETCAN_BUILD_PATCH;
 	if(ICSNEO_SOCKETCAN_BUILD_METADATA[0] != '\0')
@@ -216,7 +216,7 @@ void header() {
 
 void usage(std::string executableName) {
 	std::cerr << "The libicsneo SocketCAN Usermode Daemon\n";
-	std::cerr << "Copyright 2019-2022 Intrepid Control Systems, Inc.\n\n";
+	std::cerr << "Copyright 2019-2023 Intrepid Control Systems, Inc.\n\n";
 	std::cerr << "Usage: " << executableName << " [option]\n\n";
 	std::cerr << "Options:\n";
 	std::cerr << "\t-d,     --daemon\t\tRun as a daemon in the background\n";
@@ -305,7 +305,7 @@ void searchForDevices() {
 		}
 
 		// Create rx listener
-		newDevice.device->addMessageCallback(icsneo::MessageCallback([serial](std::shared_ptr<icsneo::Message> message) {
+		newDevice.device->addMessageCallback(std::make_shared<icsneo::MessageCallback>([serial](std::shared_ptr<icsneo::Message> message) {
 			const auto frame = std::static_pointer_cast<icsneo::Frame>(message);
 			const auto messageType = frame->network.getType();
 			const OpenDevice* openDevice = nullptr;
