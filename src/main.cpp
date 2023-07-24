@@ -45,6 +45,8 @@
 #define GET_RX_BOX(DEVICE_INDEX)	(reinterpret_cast<uint8_t*>(sharedMemory) + (RX_BOX_SIZE * DEVICE_INDEX))
 #define GET_TX_BOX(INDEX)		(reinterpret_cast<uint8_t*>(sharedMemory) + (sharedMemSize / 2) + (INDEX * TX_BOX_SIZE))
 
+#define DEFAULT_SCAN_INTERVAL_MS 1000
+
 bool runningAsDaemon = false;
 int driver = 0; // /dev/intrepid_netdevice
 int driverMajor = 0;
@@ -54,6 +56,7 @@ int maxInterfaces = 0; // From driver
 int sharedMemSize = 0; // From driver
 void* sharedMemory = nullptr;
 std::string serialFilter;
+int scanIntervalMs = DEFAULT_SCAN_INTERVAL_MS;
 
 std::atomic<bool> stopRunning(false);
 
@@ -219,10 +222,11 @@ void usage(std::string executableName) {
 	std::cerr << "Copyright 2019-2023 Intrepid Control Systems, Inc.\n\n";
 	std::cerr << "Usage: " << executableName << " [option]\n\n";
 	std::cerr << "Options:\n";
-	std::cerr << "\t-d,     --daemon\t\tRun as a daemon in the background\n";
-	std::cerr << "\t-h, -?, --help, --usage\t\tShow this help page\n";
-	std::cerr << "\t        --devices\t\tList supported devices\n";
-	std::cerr << "\t        --filter <serial>\tOnly connect to devices with serial\n\t\t\t\t\tnumbers starting with this filter\n";
+	std::cerr << "\t-d,     --daemon\t\t\tRun as a daemon in the background\n";
+	std::cerr << "\t-h, -?, --help, --usage\t\t\tShow this help page\n";
+	std::cerr << "\t        --devices\t\t\tList supported devices\n";
+	std::cerr << "\t        --filter <serial>\t\tOnly connect to devices with serial\n\t\t\t\t\t\tnumbers starting with this filter\n";
+	std::cerr << "\t        --scan-interval-ms <interval>\tDevice scan interval in ms\n\t\t\t\t\t\tIf 0, only a single scan is performed\n";
 }
 
 void terminateSignal(int signal) {
@@ -378,7 +382,10 @@ void searchForDevices() {
 void deviceSearchThread() {
 	while(!stopRunning) {
 		searchForDevices();
-		std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+		if(scanIntervalMs == 0) {
+			break;
+		}
+		std::this_thread::sleep_for(std::chrono::milliseconds(scanIntervalMs));
 	}
 }
 
@@ -399,6 +406,21 @@ int main(int argc, char** argv) {
 		} else if(arg == "--filter" && i + 1 <= argc) {
 			serialFilter = argv[++i];
 			transform(serialFilter.begin(), serialFilter.end(), serialFilter.begin(), ::toupper);
+		} else if(arg == "--scan-interval-ms" && i + 1 <= argc) {
+			try {
+				scanIntervalMs = std::stoi(argv[++i]);
+			} catch (const std::invalid_argument& e) {
+				std::cerr << "Invalid input for scan-interval-ms\n";
+				return EX_USAGE;
+			} catch (const std::out_of_range& e) {
+				std::cerr << "Out of range input for scan-interval-ms\n";
+				return EX_USAGE;
+			}
+
+			if(scanIntervalMs < 0) {
+				std::cerr << "Invalid input for scan-interval-ms\n";
+				return EX_USAGE;
+			}
 		} else {
 			usage(argv[0]);
 			return EX_USAGE;
