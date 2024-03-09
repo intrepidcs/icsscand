@@ -39,6 +39,7 @@
 #define SIOCGMAXIFACES			0x3007
 #define SIOCGVERSION			0x3008
 #define SIOCGCLIENTVEROK		0x3009
+#define SIOCSBAUDRATE			0x300A
 
 #define RX_BOX_SIZE			(sharedMemSize / (maxInterfaces * 2))
 #define TX_BOX_SIZE			(sharedMemSize / 4)
@@ -95,6 +96,25 @@ public:
 			LOGF(LOG_DEBUG, "Removed device %s with handle %d, result %d\n", name.c_str(), kernelHandle, res);
 		} else
 			LOG(LOG_DEBUG, "Removing interface which was not opened successfully\n");
+	}
+
+	bool reportBaudrates(int64_t baudrate, int64_t fd_baudrate) {
+		struct baudrate_info {
+			int handle;
+			int64_t baudrates[2];
+		} info;
+
+		info.handle = kernelHandle;
+		info.baudrates[0] = baudrate;
+		/* set fd baudrate to zero if equal to baudrate
+		 * this will disable fd mode in kernel */
+		info.baudrates[1] = (fd_baudrate==baudrate)?0:fd_baudrate;
+		if (ioctl(driver, SIOCSBAUDRATE, &info) != 0) {
+			LOGF(LOG_INFO, "Unable to set baudrate for device %s\n", name.c_str());
+			return false;
+		}
+
+		return true;
 	}
 	NetworkInterface(const NetworkInterface&) = delete;
 	NetworkInterface& operator =(const NetworkInterface&) = delete;
@@ -306,6 +326,16 @@ void searchForDevices() {
 				failedToOpen.push_back(serial);
 			}
 			continue;
+		}
+		if (driverMinor > 0) {
+			for(const auto& net : supportedNetworks) {
+				if (net.getType() != icsneo::Network::Type::CAN)
+					continue;
+				newDevice.interfaces[net.getNetID()]->reportBaudrates(
+					newDevice.device->settings->getBaudrateFor(net.getNetID()),
+					newDevice.device->settings->getFDBaudrateFor(net.getNetID())
+				);
+			}
 		}
 
 		// Create rx listener
@@ -532,6 +562,33 @@ int main(int argc, char** argv) {
 				LOGF(LOG_ERR, "Unexpected number of bytes read, expected %d got %d\n", (int)sizeof(info), (int)r);
 				stopRunning = true;
 				break;
+			} else if (info.tx_box_index < 0) {
+				// Baudrate changed in kernel
+				int dev_idx = -(info.tx_box_index + 1);
+				LOGF(LOG_INFO, "Baudrate change, device %d, baudrate %d fd_baudrate %ld\n",
+					dev_idx, info.count, info.bytes);
+				/* fd baudrate is zero if fd mode is disabled in kernel
+				 * set fd baudrate equal to baudrate */
+				if (info.bytes == 0) {
+					info.bytes = info.count;
+				}
+				for(auto& dev : openDevices) {
+					for(auto& netifPair : dev.interfaces) {
+						auto netid = netifPair.first;
+						if(netifPair.second->getKernelHandle() != dev_idx)
+							continue;
+						if (! dev.device->settings->setBaudrateFor(netid, info.count) ) {
+							LOGF(LOG_ERR, "Unable to set baudrate for device %s\n",
+								netifPair.second->getName().c_str());
+						} else if (! dev.device->settings->setFDBaudrateFor(netid, info.bytes)) {
+							LOGF(LOG_ERR, "Unable to set fd baudrate for device %s\n",
+								netifPair.second->getName().c_str());
+						} else if (! dev.device->settings->apply()) {
+							LOGF(LOG_ERR, "Unable to apply settings for device %s\n",
+								netifPair.second->getName().c_str());
+						}
+					}
+				}
 			} else {
 				// Send!
 				uint8_t* currentPosition = GET_TX_BOX(info.tx_box_index);
