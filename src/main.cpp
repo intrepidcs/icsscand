@@ -222,7 +222,7 @@ std::string sanitizeInterfaceName(std::string str) {
 
 void header() {
 	std::cout << "The libicsneo SocketCAN Usermode Daemon\n";
-	std::cout << "Copyright Intrepid Control Systems, Inc. 2024\n\n";
+	std::cout << "Copyright Intrepid Control Systems, Inc. 2025\n\n";
 	std::cout << "Daemon v";
 	std::cout << (int)ICSNEO_SOCKETCAN_BUILD_MAJOR << '.' << (int)ICSNEO_SOCKETCAN_BUILD_MINOR << '.' << (int)ICSNEO_SOCKETCAN_BUILD_PATCH;
 	if(ICSNEO_SOCKETCAN_BUILD_METADATA[0] != '\0')
@@ -239,7 +239,7 @@ void header() {
 
 void usage(std::string executableName) {
 	std::cerr << "The libicsneo SocketCAN Usermode Daemon\n";
-	std::cerr << "Copyright 2019-2024 Intrepid Control Systems, Inc.\n\n";
+	std::cerr << "Copyright 2019-2025 Intrepid Control Systems, Inc.\n\n";
 	std::cerr << "Usage: " << executableName << " [option]\n\n";
 	std::cerr << "Options:\n";
 	std::cerr << "\t-d,     --daemon\t\t\tRun as a daemon in the background\n";
