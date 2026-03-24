@@ -1,3 +1,4 @@
 [submodule "third-party/libicsneo"]
 	path = third-party/libicsneo
 	url = https://github.com/intrepidcs/libicsneo.git
+	branch = master
