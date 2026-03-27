@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.2)
-project(libicsneo-socketcan-daemon VERSION 3.2.0)
+project(libicsneo-socketcan-daemon VERSION 3.3.0)
 
 set(CMAKE_CXX_STANDARD 17)
 
@@ -27,5 +27,5 @@ include_directories(BEFORE ${CMAKE_CURRENT_BINARY_DIR})
 
 add_subdirectory("third-party/libicsneo")
 
-add_executable(libicsneo-socketcan-daemon src/main.cpp)
+add_executable(libicsneo-socketcan-daemon src/main.cpp src/netlink.c)
 target_link_libraries(libicsneo-socketcan-daemon icsneocpp)
