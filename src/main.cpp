@@ -17,6 +17,8 @@
 #include <fcntl.h>
 #include <signal.h>
 #include <linux/if.h>
+#include <sys/eventfd.h>
+#include <poll.h>
 
 #include <icsneo/icsneocpp.h>
 #include <icsneo/communication/message/neomessage.h>
@@ -58,6 +60,7 @@ int sharedMemSize = 0; // From driver
 void* sharedMemory = nullptr;
 std::string serialFilter;
 int scanIntervalMs = DEFAULT_SCAN_INTERVAL_MS;
+std::string fifoPath;
 
 std::atomic<bool> stopRunning(false);
 
@@ -203,6 +206,327 @@ std::vector<OpenDevice> openDevices;
 std::vector<std::string /* serial */> failedToOpen;
 std::mutex openDevicesMutex;
 
+class RPC {
+public:
+	RPC() {
+		if(::mkfifo(fifoPath.c_str(), 0777) == -1) {
+			throw std::runtime_error("Error creating RPC FIFO: " + std::string(strerror(errno)));
+			return;
+		}
+		::chmod(fifoPath.c_str(), 0777);
+		fifo = ::open(fifoPath.c_str(), O_RDWR);
+		if(fifo == -1) {
+			throw std::runtime_error("Error opening RPC FIFO: " + std::string(strerror(errno)));
+			return;
+		}
+		interrupt = ::eventfd(0, 0);
+		if(interrupt == -1) {
+			throw std::runtime_error("Error opening eventfd: " + std::string(strerror(errno)));
+			return;
+		}
+		thread = std::thread(&RPC::loop, this);
+	}
+
+	~RPC() {
+		uint64_t u = 1;
+		::write(interrupt, &u, sizeof(uint64_t));
+		thread.join();
+		::close(fifo);
+		::close(interrupt);
+		::unlink(fifoPath.c_str());
+	}
+
+private:
+	int fifo;
+	int interrupt;
+	std::thread thread;
+
+	void loop() {
+		static char buffer[2048];
+		struct pollfd fds[2] = {};
+		fds[0].fd = fifo;
+		fds[0].events = POLLIN;
+		fds[1].fd = interrupt;
+		fds[1].events = POLLIN;
+		while (!stopRunning) {
+			if(::poll(fds, 2, -1) == -1) {
+				LOGF(LOG_WARNING, "Error polling for RPC: %s\n", strerror(errno));
+				break;
+			}
+			if(fds[1].revents & POLLIN) {
+				break;
+			}
+			const auto size = ::read(fifo, buffer, sizeof(buffer));
+			if (size == -1) {
+				LOGF(LOG_WARNING, "Error reading from RPC FIFO: %s\n", strerror(errno));
+				break;
+			}
+			const auto args = split(std::string(buffer, size));
+			if(args.size() < 2) {
+				continue;
+			}
+			const auto& apiVersion = args[0];
+			const auto& command = args[1];
+			if(apiVersion != "1") {
+				LOGF(LOG_WARNING, "Invalid API version, expected '1' got '%s'\n", apiVersion.c_str());
+				continue;
+			}
+			if(command == "lock_networks") {
+				lockNetworks(args);
+			} else if(command == "unlock_networks") {
+				unlockNetworks(args);
+			} else if(command == "get_network_mutex_status") {
+				getNetworkMutexStatus(args);
+			} else if(command == "get_devices") {
+				getSerials(args);
+			} else {
+				LOGF(LOG_WARNING, "Unknown command '%s'\n", command.c_str());
+			}
+		}
+	}
+
+	bool parseNetid(const std::string& arg, icsneo::Network::NetID& netid) {
+		try {
+			netid = static_cast<icsneo::Network::NetID>(std::stoi(arg));
+			return true;
+		} catch (const std::exception& e) {
+			LOGF(LOG_WARNING, "Invalid netid '%s': %s\n", arg.c_str(), e.what());
+			return false;
+		}
+	}
+
+	bool parseNetids(const std::string& arg, std::set<icsneo::Network::NetID>& netids) {
+		for(auto&& str : split(arg, ',')) {
+			icsneo::Network::NetID nid;
+			if(!parseNetid(str, nid)) {
+				return false;
+			}
+			netids.emplace(nid);			
+		}
+		return true;
+	}
+
+	template<typename T>
+	std::string optionalArg(const std::optional<T>& opt) {
+		return opt ? std::to_string((uint64_t)*opt) : "-1";
+	}
+
+
+	bool fifoWrite(const std::string& message, const std::string& fifoPath) {
+		int fifo = ::open(fifoPath.c_str(), O_WRONLY);
+		if(fifo == -1) {
+			return false;
+		}
+		if(::write(fifo, message.c_str(), message.size()) == -1) {
+			::close(fifo);
+			return false;
+		}
+		::close(fifo);
+		return true;
+	}
+
+	std::vector<std::string> split(const std::string& str, char delim = ' ') {
+		if(str.empty())
+			return {};
+		std::vector<std::string> ret;
+		size_t tail = 0;
+		size_t head = 0;
+		while(head < str.size()) {
+			if(str[head] == delim) {
+				ret.emplace_back(&str[tail], head - tail);
+				tail = head + 1;
+			}
+			++head;
+		}
+		ret.emplace_back(&str[tail], head - tail);
+		return ret;
+	}
+
+	std::string join(const std::vector<std::string>& parts, char delim = ' ') {
+		if(parts.empty())
+			return "";
+		std::string ret = parts[0];
+		for(size_t i = 1; i < parts.size(); i++) {
+			ret += delim + parts[i];
+		}
+		return ret;
+	}
+
+	void lockNetworks(const std::vector<std::string>& args) {
+		if(args.size() != 8) {
+			LOGF(LOG_WARNING, "lock_networks requires 8 arguments, got %zu\n", args.size());
+			return;
+		}
+		const auto& serial = args[2];
+		const auto& clientFifoPath = args[7];
+
+		std::set<icsneo::Network::NetID> netids;
+		if(!parseNetids(args[3], netids)) {
+			fifoWrite("0", clientFifoPath);
+			return;
+		}
+
+		uint32_t priority;
+		try {
+			priority = std::stoul(args[4]);
+		} catch (const std::exception& e) {
+			LOGF(LOG_WARNING, "Invalid priority '%s': %s\n", args[4].c_str(), e.what());
+			fifoWrite("0", clientFifoPath);
+			return;
+		}
+		
+		uint32_t ttl;
+		try {
+			ttl = std::stoul(args[5]);
+		} catch (const std::exception& e) {
+			LOGF(LOG_WARNING, "Invalid TTL '%s': %s\n", args[5].c_str(), e.what());
+			fifoWrite("0", clientFifoPath);
+			return;
+		}
+
+		icsneo::NetworkMutexType type;
+		try {
+			type = static_cast<icsneo::NetworkMutexType>(std::stoi(args[6]));
+		} catch (const std::exception& e) {
+			LOGF(LOG_WARNING, "Invalid mutex type '%s': %s\n", args[6].c_str(), e.what());
+			fifoWrite("0", clientFifoPath);
+			return;
+		}
+
+		std::lock_guard<std::mutex> lg(openDevicesMutex);
+		std::shared_ptr<icsneo::Device> device;
+		for(const auto& dev : openDevices) {
+			if(dev.device->getSerial() == serial) {
+				device = dev.device;
+				break;
+			}
+		}
+		if(!device) {
+			LOGF(LOG_WARNING, "Device with serial '%s' not found\n", serial.c_str());
+			fifoWrite("0", clientFifoPath);
+			return;
+		}
+		const auto locked = device->lockNetworks(netids, priority, ttl, type, [serial](std::shared_ptr<icsneo::Message> msg) -> void {
+			auto mutexMsg = std::dynamic_pointer_cast<icsneo::NetworkMutexMessage>(msg);
+			if(!mutexMsg) {
+				LOG(LOG_WARNING, "Received a message for the network mutex callback which was not a NetworkMutexMessage\n");
+				return;
+			}
+			LOGF(LOG_INFO, "Received network mutex event for device %s\n", serial.c_str());
+		});
+		if(!locked) {
+			LOGF(LOG_WARNING, "Failed to lock networks for device '%s'\n", icsneo::GetLastError().describe().c_str());
+			fifoWrite("0", clientFifoPath);
+			return;
+		}
+		device->removeMessageCallback(*locked); // client will explicitly poll status
+		fifoWrite("1", clientFifoPath);
+	}
+
+	void unlockNetworks(const std::vector<std::string>& args) {
+		if(args.size() != 5) {
+			LOGF(LOG_WARNING, "unlock_networks requires 5 arguments, got %zu\n", args.size());
+			return;
+		}
+		const auto& serial = args[2];
+		const auto& clientFifoPath = args[4];
+
+		std::set<icsneo::Network::NetID> netids;
+		if(!parseNetids(args[3], netids)) {
+			fifoWrite("0", clientFifoPath);
+			return;
+		}
+
+		std::lock_guard<std::mutex> lg(openDevicesMutex);
+		std::shared_ptr<icsneo::Device> device;
+		for(const auto& dev : openDevices) {
+			if(dev.device->getSerial() == serial) {
+				device = dev.device;
+				break;
+			}
+		}
+		if(!device) {
+			LOGF(LOG_WARNING, "Device with serial '%s' not found\n", serial.c_str());
+			fifoWrite("0", clientFifoPath);
+			return;
+		}
+
+		const auto success = device->unlockNetworks(netids);
+		if(!success) {
+			LOGF(LOG_WARNING, "Failed to unlock networks for device '%s': %s\n", serial.c_str(), icsneo::GetLastError().describe().c_str());
+			fifoWrite("0", clientFifoPath);
+			return;
+		}
+		fifoWrite("1", clientFifoPath);
+	}
+
+	void getNetworkMutexStatus(const std::vector<std::string>& args) {
+		if(args.size() != 5) {
+			LOGF(LOG_WARNING, "get_network_mutex_status requires 5 arguments, got %zu\n", args.size());
+			return;
+		}
+		const auto& serial = args[2];
+		const auto& clientFifoPath = args[4];
+
+		icsneo::Network::NetID netid;
+		if(!parseNetid(args[3], netid)) {
+			fifoWrite("0", clientFifoPath);
+			return;
+		}
+
+		std::lock_guard<std::mutex> lg(openDevicesMutex);
+		std::shared_ptr<icsneo::Device> device;
+		for(const auto& dev : openDevices) {
+			if(dev.device->getSerial() == serial) {
+				device = dev.device;
+				break;
+			}
+		}
+		if(!device) {
+			LOGF(LOG_WARNING, "Device with serial '%s' not found\n", serial.c_str());
+			fifoWrite("0", clientFifoPath);
+			return;
+		}
+
+		const auto status = device->getNetworkMutexStatus(netid);
+
+		if(!status) {
+			LOGF(LOG_WARNING, "Failed to get network mutex status for device '%s': %s\n", serial.c_str(), icsneo::GetLastError().describe().c_str());
+			fifoWrite("0", clientFifoPath);
+			return;
+		}
+
+		const std::string id = optionalArg(status->owner_id);
+		const std::string type = optionalArg(status->type);
+		const std::string priority = optionalArg(status->priority);
+		const std::string ttl = optionalArg(status->ttlMs);
+		std::vector<std::string> networkStrs;
+		for(const auto& net : status->networks) {
+			networkStrs.push_back(std::to_string((neonetid_t)net));
+		}
+		const std::string networks = join(networkStrs, ',');
+		const std::string event = optionalArg(status->event);
+
+		const std::string response = join({"1", id, type, priority, ttl, networks, event});
+
+		fifoWrite(response, clientFifoPath);
+	}
+
+	void getSerials(const std::vector<std::string>& args) {
+		if(args.size() != 3) {
+			LOGF(LOG_WARNING, "get_serials requires 3 arguments, got %zu\n", args.size());
+			return;
+		}
+		const auto& clientFifoPath = args[2];
+		std::string response = "1";
+		std::lock_guard<std::mutex> lg(openDevicesMutex);
+		for(const auto& dev : openDevices) {
+			response += ' ' + dev.device->getSerial();
+		}
+		fifoWrite(response, clientFifoPath);
+	}
+};
+
 std::string& replaceInPlace(std::string& str, char o, const std::string& n) {
 	size_t start_pos = 0;
 	const size_t new_len = n.length();
@@ -247,6 +571,7 @@ void usage(std::string executableName) {
 	std::cerr << "\t        --devices\t\t\tList supported devices\n";
 	std::cerr << "\t        --filter <serial>\t\tOnly connect to devices with serial\n\t\t\t\t\t\tnumbers starting with this filter\n";
 	std::cerr << "\t        --scan-interval-ms <interval>\tDevice scan interval in ms\n\t\t\t\t\t\tIf 0, only a single scan is performed\n";
+	std::cerr << "\t        --fifo-path <path>\t\tPath to RPC FIFO for libicsneo control\n";
 }
 
 void terminateSignal(int signal) {
@@ -339,29 +664,23 @@ void searchForDevices() {
 		}
 
 		// Create rx listener
-		newDevice.device->addMessageCallback(std::make_shared<icsneo::MessageCallback>([serial](std::shared_ptr<icsneo::Message> message) {
-			const auto frame = std::static_pointer_cast<icsneo::Frame>(message);
-			const auto messageType = frame->network.getType();
-			const OpenDevice* openDevice = nullptr;
-			std::lock_guard<std::mutex> lg(openDevicesMutex);
-			for(const auto& dev : openDevices) {
-				if(dev.device->getSerial() == serial) {
-					openDevice = &dev;
-					break;
+		for(auto&& interface : newDevice.interfaces) {
+			newDevice.device->addMessageCallback(std::make_shared<icsneo::MessageCallback>([interface = interface.second](std::shared_ptr<icsneo::Message> message) {
+				const auto frame = std::static_pointer_cast<icsneo::Frame>(message);
+				const auto messageType = frame->network.getType();
+				if(frame->type != icsneo::Message::Type::Frame) {
+					LOG(LOG_ERR, "Dropping message: received invalid message type, expected RawMessage\n");
+					return;
 				}
-			}
-			if(frame->type != icsneo::Message::Type::Frame) {
-				LOG(LOG_ERR, "Dropping message: received invalid message type, expected RawMessage\n");
-				return;
-			}
-
-			if(messageType == icsneo::Network::Type::CAN) {
-				openDevice->interfaces.at(frame->network.getNetID())->addReceivedMessageToQueue<neomessage_can_t>(frame);
-			} else if(messageType == icsneo::Network::Type::Ethernet) {
-				openDevice->interfaces.at(frame->network.getNetID())->addReceivedMessageToQueue<neomessage_eth_t>(frame);
-			} else
-				LOG(LOG_ERR, "Dropping message, only CAN and Ethernet are currently supported\n");
-		}));
+				if(messageType == icsneo::Network::Type::CAN) {
+					interface->addReceivedMessageToQueue<neomessage_can_t>(frame);
+				} else if(messageType == icsneo::Network::Type::Ethernet) {
+					interface->addReceivedMessageToQueue<neomessage_eth_t>(frame);
+				} else {
+					LOG(LOG_ERR, "Dropping message, only CAN and Ethernet are currently supported\n");
+				}
+			}, std::make_shared<icsneo::MessageFilter>(interface.first)));
+		}
 
 		LOGF(LOG_INFO, "%s connected\n", newDevice.device->describe().c_str());
 		failedToOpen.erase(std::remove_if(failedToOpen.begin(), failedToOpen.end(), [&serial](const std::string& s) -> bool {
@@ -451,6 +770,8 @@ int main(int argc, char** argv) {
 				std::cerr << "Invalid input for scan-interval-ms\n";
 				return EX_USAGE;
 			}
+		} else if(arg == "--fifo-path" && i + 1 <= argc) {
+			fifoPath = argv[++i];
 		} else {
 			usage(argv[0]);
 			return EX_USAGE;
@@ -531,6 +852,16 @@ int main(int argc, char** argv) {
 	} else {
 		signal(SIGINT, terminateSignal);
 		LOG(LOG_INFO, "Waiting for connections...\n");
+	}
+
+	std::unique_ptr<RPC> rpc;
+	if(!fifoPath.empty()) {
+		try {
+			rpc = std::make_unique<RPC>();
+		} catch (const std::exception& e) {
+			LOGF(LOG_ERR, "Failed to set up RPC: %s\n", e.what());
+			return EXIT_FAILURE;
+		}
 	}
 
 	std::thread searchThread(deviceSearchThread);
