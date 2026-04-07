@@ -277,7 +277,7 @@ private:
 				unlockNetworks(args);
 			} else if(command == "get_network_mutex_status") {
 				getNetworkMutexStatus(args);
-			} else if(command == "get_devices") {
+			} else if(command == "get_serials") {
 				getSerials(args);
 			} else {
 				LOGF(LOG_WARNING, "Unknown command '%s'\n", command.c_str());
