@@ -579,8 +579,8 @@ void terminateSignal(int signal) {
 }
 
 void searchForDevices() {
-	auto found = icsneo::FindAllDevices();
 	std::lock_guard<std::mutex> lg(openDevicesMutex);
+	auto found = icsneo::FindAllDevices();
 
 	// Open devices we have not seen before
 	for(auto& dev : found) {
@@ -934,25 +934,35 @@ int main(int argc, char** argv) {
 						continue;
 					}
 
-					bool sent = false;
-					std::lock_guard<std::mutex> lg(openDevicesMutex);
-					for(auto& dev : openDevices) {
-						for(auto& netifPair : dev.interfaces) {
-							if(netifPair.second->getKernelHandle() != msg->netid)
-								continue;
-							msg->netid = static_cast<uint16_t>(netifPair.first);
-							auto txMsg = icsneo::CreateMessageFromNeoMessage(reinterpret_cast<neomessage_t*>(msg));
-							auto tx = std::dynamic_pointer_cast<icsneo::Frame>(txMsg);
-							if(!tx || !dev.device->transmit(tx))
-								break;
-							sent = true;
-							break;
+					const auto transmit = [&] {
+						std::lock_guard<std::mutex> lg(openDevicesMutex);
+						for(auto it = openDevices.begin(); it != openDevices.end(); ++it) {
+							auto& dev = *it;
+							for(auto& netifPair : dev.interfaces) {
+								if(netifPair.second->getKernelHandle() != msg->netid)
+									continue;
+								if(!dev.device->isOpen() || !dev.device->isOnline() || dev.device->isDisconnected()) {
+									LOGF(LOG_ERR, "Message dropped, %s is not open and online\n", dev.device->getSerial().c_str());
+									openDevices.erase(it);
+									return;
+								}
+								msg->netid = static_cast<uint16_t>(netifPair.first);
+								auto txMsg = icsneo::CreateMessageFromNeoMessage(reinterpret_cast<neomessage_t*>(msg));
+								auto tx = std::dynamic_pointer_cast<icsneo::Frame>(txMsg);
+								if(!tx) {
+									LOG(LOG_ERR, "Message dropped, invalid transmit message\n");
+										return;
+									}
+								if(!dev.device->transmit(tx)) {
+									LOGF(LOG_ERR, "Message dropped, unable to transmit: %s\n", icsneo::GetLastError().describe().c_str());
+									return;
+								}
+								return;
+							}
 						}
-						if(sent)
-							break;
-					}
-					if(!sent)
 						LOG(LOG_ERR, "Message dropped, could not find the device the kernel referenced\n");
+					};
+					transmit();
 				}
 			}
 		}
