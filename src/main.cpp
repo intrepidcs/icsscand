@@ -43,6 +43,11 @@
 #define SIOCGCLIENTVEROK		0x3009
 #define SIOCSBAUDRATE			0x300A
 
+/* Flag bits encoded by the kernel module into intrepid_pending_tx_info.count
+ * when reporting a settings change (tx_box_index < 0). Must match intrepid.c. */
+#define INTREPID_BITRATE_FLAG_LISTENONLY	(1 << 30)
+#define INTREPID_BITRATE_VALUE_MASK		(INTREPID_BITRATE_FLAG_LISTENONLY - 1)
+
 #define RX_BOX_SIZE			(sharedMemSize / (maxInterfaces * 2))
 #define TX_BOX_SIZE			(sharedMemSize / 4)
 #define GET_RX_BOX(DEVICE_INDEX)	(reinterpret_cast<uint8_t*>(sharedMemory) + (RX_BOX_SIZE * DEVICE_INDEX))
@@ -894,30 +899,66 @@ int main(int argc, char** argv) {
 				stopRunning = true;
 				break;
 			} else if (info.tx_box_index < 0) {
-				// Baudrate changed in kernel
+				// Baudrate and/or control mode changed in kernel
 				int dev_idx = -(info.tx_box_index + 1);
-				LOGF(LOG_INFO, "Baudrate change, device %d, baudrate %d fd_baudrate %ld\n",
-					dev_idx, info.count, info.bytes);
+				const bool listenOnly = (info.count & INTREPID_BITRATE_FLAG_LISTENONLY) != 0;
+				const int64_t baudrate = info.count & INTREPID_BITRATE_VALUE_MASK;
+				LOGF(LOG_INFO, "Settings change, device %d, baudrate %ld fd_baudrate %zu listen_only %d\n",
+					dev_idx, (long)baudrate, info.bytes, listenOnly ? 1 : 0);
 				/* fd baudrate is zero if fd mode is disabled in kernel
 				 * set fd baudrate equal to baudrate */
 				if (info.bytes == 0) {
-					info.bytes = info.count;
+					info.bytes = baudrate;
 				}
-				for(auto& dev : openDevices) {
-					for(auto& netifPair : dev.interfaces) {
-						auto netid = netifPair.first;
-						if(netifPair.second->getKernelHandle() != dev_idx)
-							continue;
-						if (! dev.device->settings->setBaudrateFor(netid, info.count) ) {
-							LOGF(LOG_ERR, "Unable to set baudrate for device %s\n",
-								netifPair.second->getName().c_str());
-						} else if (! dev.device->settings->setFDBaudrateFor(netid, info.bytes)) {
-							LOGF(LOG_ERR, "Unable to set fd baudrate for device %s\n",
-								netifPair.second->getName().c_str());
-						} else if (! dev.device->settings->apply()) {
-							LOGF(LOG_ERR, "Unable to apply settings for device %s\n",
-								netifPair.second->getName().c_str());
+				/* Find the target device under the lock, but stage and apply the
+				 * settings outside of it: IDeviceSettings::apply() can block for
+				 * several seconds and must not hold openDevicesMutex against the
+				 * device-search and RPC threads for that long. The shared_ptr
+				 * keeps the device alive if the search thread drops it
+				 * concurrently. */
+				std::shared_ptr<icsneo::Device> targetDevice;
+				icsneo::Network::NetID targetNetid{};
+				std::string targetName;
+				{
+					std::lock_guard<std::mutex> lg(openDevicesMutex);
+					for(auto& dev : openDevices) {
+						for(auto& netifPair : dev.interfaces) {
+							if(netifPair.second->getKernelHandle() != dev_idx)
+								continue;
+							targetDevice = dev.device;
+							targetNetid = netifPair.first;
+							targetName = netifPair.second->getName();
+							break;
 						}
+						if(targetDevice)
+							break;
+					}
+				}
+				/* Stage the baudrates before the control mode so a rejected
+				 * baudrate cannot leave a partially staged mode change behind. */
+				if (!targetDevice) {
+					LOGF(LOG_ERR, "Settings change for unknown device handle %d\n", dev_idx);
+				} else if (! targetDevice->settings->setBaudrateFor(targetNetid, baudrate) ) {
+					LOGF(LOG_ERR, "Unable to set baudrate for device %s\n", targetName.c_str());
+				} else if (! targetDevice->settings->setFDBaudrateFor(targetNetid, info.bytes)) {
+					LOGF(LOG_ERR, "Unable to set fd baudrate for device %s\n", targetName.c_str());
+				} else {
+					CAN_SETTINGS* canCfg = targetDevice->settings->getMutableCANSettingsFor(targetNetid);
+					if (canCfg != nullptr) {
+						/* Only toggle between NORMAL and LISTEN_ONLY here. Other
+						 * modes (LOOPBACK, LISTEN_ALL, DISABLE) may have been
+						 * configured with other tools and are left untouched by
+						 * bitrate-only changes. */
+						if (listenOnly)
+							canCfg->Mode = LISTEN_ONLY;
+						else if (canCfg->Mode == LISTEN_ONLY)
+							canCfg->Mode = NORMAL;
+					} else if (listenOnly) {
+						LOGF(LOG_ERR, "Listen-only requested but no CAN settings for device %s\n",
+							targetName.c_str());
+					}
+					if (! targetDevice->settings->apply()) {
+						LOGF(LOG_ERR, "Unable to apply settings for device %s\n", targetName.c_str());
 					}
 				}
 			} else {
